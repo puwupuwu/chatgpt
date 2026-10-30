@@ -13,7 +13,7 @@ test('edit, undo, highlight, sign, rotate, organize and export',async({page})=>{
  await expect(page.locator('#undo')).toBeEnabled();
  await page.locator('#undo').click();await expect(page.locator('#redo')).toBeEnabled();
  await page.locator('#redo').click();await expect(page.locator('#export')).toBeEnabled();
- await page.getByRole('button',{name:'Highlight',exact:true}).click();
+ await page.locator('[data-tool="highlight"]').click();
  let box=await page.locator('#ink').boundingBox();
  await page.mouse.move(box.x+60,box.y+110);await page.mouse.down();await page.mouse.move(box.x+280,box.y+130,{steps:8});await page.mouse.up();
  await expect(page.locator('#export')).toBeEnabled();
@@ -30,15 +30,13 @@ test('edit, undo, highlight, sign, rotate, organize and export',async({page})=>{
  expect(pdf.getPageCount()).toBe(1);expect(pdf.getPage(0).getRotation().angle).toBe(90);
  await page.locator('#file').setInputFiles({name:'exported.pdf',mimeType:'application/pdf',buffer:bytes});
  await expect(page.locator('#filename')).toHaveText('exported.pdf');await expect(page.locator('#export')).toBeEnabled();
- const text=await page.evaluate(async()=>{
+ const text=await page.evaluate(async(data)=>{
   const pdfjs=await import('/node_modules/pdfjs-dist/build/pdf.mjs');
-  const {samplePdf,inspect,buildPdf}=await import('/src/pdf.js');
-  const original=await samplePdf(),pages=await inspect(original);
-  pages[0].annotations.push({type:'text',text:'Roundtrip check',x:40,y:40,size:16,color:'#000000'});
-  const doc=await pdfjs.getDocument({data:await buildPdf(original,pages)}).promise;
+  pdfjs.GlobalWorkerOptions.workerSrc='/node_modules/pdfjs-dist/build/pdf.worker.mjs';
+  const doc=await pdfjs.getDocument({data:new Uint8Array(data)}).promise;
   const p=await doc.getPage(1),content=await p.getTextContent();await doc.destroy();return content.items.map(x=>x.str).join(' ');
- });
- expect(text).toContain('Roundtrip check');expect(errors).toEqual([]);
+ },Array.from(bytes));
+ expect(text).toContain('Approved by Paperdesk');expect(errors).toEqual([]);
 });
 test('invalid PDF shows a recoverable error',async({page})=>{
  await page.goto('/');await page.locator('#file').setInputFiles({name:'bad.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a PDF')});

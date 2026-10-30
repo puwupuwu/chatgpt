@@ -89,7 +89,7 @@ function pos(e){const r=$('ink').getBoundingClientRect();return [Math.max(0,Math
 $('ink').onpointerdown=e=>{
   if(busy||!original||e.button!==0)return;
   const p=pos(e);
-  if(tool==='text'){point=viewport.convertToPdfPoint(...p);$('textValue').value='';$('textDialog').showModal();$('textValue').focus();return;}
+  if(tool==='text'){point=viewport.convertToPdfPoint(...p);$('textValue').value='';$('textDialog').returnValue='';$('textDialog').showModal();$('textValue').focus();return;}
   $('ink').setPointerCapture(e.pointerId);gesture={tool,points:[p],id:e.pointerId,color:$('color').value};
 };
 $('ink').onpointermove=e=>{
