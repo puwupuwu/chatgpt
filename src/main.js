@@ -6,17 +6,22 @@ import { listContent, editContent } from './content.js';
 pdfjs.GlobalWorkerOptions.workerSrc=worker;
 const $=id=>document.getElementById(id);
 let original=null,pages=[],current=0,tool='text',busy=false,viewport,history=[],future=[],dirty=false,name='document.pdf',gesture=null,point=null;
+let inlineEdit=null;
 let renderedBytes=null,contentItems=[],selected=null,objectDrag=null,imageMode='insert';
 const copy=x=>structuredClone(x);
 const status=(message,error=false)=>{$('status').textContent=message;$('status').classList.toggle('error',error);};
 function controls(){
-  for(const id of ['insertImage','insertShape','applyObject','removeObject','replaceImage'])$(id).disabled=busy||!original;
-  for(const id of ['export','rotate','delete','moveLeft','moveRight','prev','next']) $(id).disabled=busy||!pages.length;
-  $('delete').disabled=busy||pages.length<2;
-  $('prev').disabled=$('moveLeft').disabled=busy||current===0;
-  $('next').disabled=$('moveRight').disabled=busy||current>=pages.length-1;
-  $('undo').disabled=busy||!history.length;$('redo').disabled=busy||!future.length;
-  $('open').disabled=$('choose').disabled=$('sample').disabled=$('zoom').disabled=busy;
+  const editing=!!inlineEdit;
+  $('objectList').disabled=busy||editing;
+  for(const id of ['insertImage','insertShape','applyObject','removeObject','replaceImage'])$(id).disabled=busy||!original||editing;
+  $('applyObject').disabled=busy||!original;
+  for(const id of ['export','rotate','delete','moveLeft','moveRight','prev','next']) $(id).disabled=busy||!pages.length||editing;
+  $('delete').disabled=busy||editing||pages.length<2;
+  $('prev').disabled=$('moveLeft').disabled=busy||editing||current===0;
+  $('next').disabled=$('moveRight').disabled=busy||editing||current>=pages.length-1;
+  $('undo').disabled=busy||editing||!history.length;$('redo').disabled=busy||editing||!future.length;
+  $('open').disabled=$('choose').disabled=$('sample').disabled=$('zoom').disabled=busy||editing;
+  for(const b of document.querySelectorAll('[data-tool]'))b.disabled=busy||editing;
   $('position').textContent=(current+1)+' / '+pages.length;
   $('pageCount').textContent=pages.length?pages.length+' pages':'';
 }
@@ -27,6 +32,7 @@ async function locked(fn){
   finally{busy=false;controls();}
 }
 async function render(){
+  closeInline();
   const data=await buildPdf(original,pages);
   renderedBytes=data.slice();selected=null;contentItems=[];$('objects').replaceChildren();$('properties').hidden=true;
   const doc=await pdfjs.getDocument({data:data.slice(),isEvalSupported:false}).promise;
@@ -43,7 +49,7 @@ async function render(){
   controls();
 }
 async function openBytes(bytes,filename){
-  if(dirty&&!confirm('Open a new PDF and discard your unexported edits?'))return;
+  if((dirty||inlineEdit)&&!confirm('Open a new PDF and discard your unexported edits?'))return;
   const next=await inspect(bytes);
   if(!next.length)throw new Error('This PDF has no pages.');
   const old={original,pages,current,name,history,future,dirty};
@@ -75,7 +81,7 @@ for(const button of document.querySelectorAll('[data-tool]'))button.onclick=asyn
   for(const b of document.querySelectorAll('[data-tool]')){b.classList.toggle('selected',b===button);b.setAttribute('aria-pressed',String(b===button));}
   $('contentPanel').hidden=tool!=='select';$('objects').hidden=tool!=='select';$('ink').style.pointerEvents=tool==='select'?'none':'auto';
   if(tool==='select'&&original)await locked(refreshContent);
-  $('hint').textContent={select:'Select existing text, images, or vector shapes. Use the properties panel to edit them.',text:'Click on the page to place a text note.',highlight:'Drag across the area you want to highlight.',pen:'Draw with your mouse, pen, or finger to add a signature.'}[tool];
+  $('hint').textContent={select:'Click text to type directly on the page. Drag objects to move them.',text:'Click on the page to place a text note.',highlight:'Drag across the area you want to highlight.',pen:'Draw with your mouse, pen, or finger to add a signature.'}[tool];
 };
 $('zoom').onchange=()=>{if(original)locked(render);};
 $('prev').onclick=()=>locked(async()=>{current--;await render();});
@@ -86,11 +92,11 @@ $('moveLeft').onclick=()=>change(()=>{[pages[current-1],pages[current]]=[pages[c
 $('moveRight').onclick=()=>change(()=>{[pages[current+1],pages[current]]=[pages[current],pages[current+1]];current++;});
 async function travel(from,to){if(!from.length)return;await locked(async()=>{
   const before=snapshot(),next=from[from.length-1];original=next.original;pages=copy(next.pages);current=next.current;
-  try{await render();from.pop();to.push(before);dirty=true;status('History restored.');}catch(e){pages=before.pages;current=before.current;await render();throw e;}
+  try{await render();from.pop();to.push(before);dirty=true;status('History restored.');}catch(e){original=before.original;pages=before.pages;current=before.current;await render();throw e;}
 });}
 $('undo').onclick=()=>travel(history,future);$('redo').onclick=()=>travel(future,history);
 document.addEventListener('keydown',e=>{
-  if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||$('textDialog').open)return;
+  if(e.target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||$('textDialog').open)return;
   if(tool==='select'&&selected!==null&&(e.key==='Delete'||e.key==='Backspace')){e.preventDefault();applyContent({remove:true});return;}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?travel(future,history):travel(history,future);}
 });
@@ -132,7 +138,7 @@ $('export').onclick=()=>locked(async()=>{
   const a=document.createElement('a');a.href=url;a.download=name.replace(/\.pdf$/i,'')+'-edited.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
   dirty=false;status('Export downloaded. Your original file is unchanged.');
 });
-window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+window.addEventListener('beforeunload',e=>{if(dirty||inlineEdit){e.preventDefault();e.returnValue='';}});
 controls();
 
 function objectLabel(item){return item.type==='text'?'Text: '+item.text.replace(/\s+/g,' ').slice(0,70):item.type==='image'?'Image '+(item.id+1):'Vector shape '+(item.id+1);}
@@ -147,13 +153,13 @@ async function refreshContent(){
 function paintObjects(){
   const root=$('objects');root.replaceChildren();const zoom=Number($('zoom').value);
   for(const item of contentItems){
-    const b=item.bounds,button=document.createElement('button');button.className='object-box';
+    const b=item.bounds,button=document.createElement('button');button.className='object-box';if(item.type==='text')button.classList.add('text-object');
     button.dataset.objectId=item.id;button.dataset.objectType=item.type;button.title=objectLabel(item);button.setAttribute('aria-label',objectLabel(item));
     button.style.cssText='left:'+b[0]*zoom+'px;top:'+b[1]*zoom+'px;width:'+Math.max(6,(b[2]-b[0])*zoom)+'px;height:'+Math.max(6,(b[3]-b[1])*zoom)+'px';
     const grip=document.createElement('span');grip.className='resize-grip';button.append(grip);
-    button.onclick=()=>{if(!busy)selectObject(item.id);};
+    button.onclick=e=>{if(!busy&&!inlineEdit){selectObject(item.id);if(item.type==='text')startInline(item,e);}};
     button.onpointerdown=e=>{
-      if(busy||e.button!==0)return;e.preventDefault();selectObject(item.id);button.setPointerCapture(e.pointerId);
+      if(busy||inlineEdit||e.button!==0)return;e.preventDefault();selectObject(item.id);button.setPointerCapture(e.pointerId);
       objectDrag={id:item.id,start:[e.clientX,e.clientY],bounds:[...b],resize:e.target===grip,button,changed:false,pointer:e.pointerId};
     };
     button.onpointermove=e=>{
@@ -188,6 +194,7 @@ function geometry(){
 }
 async function applyContent(patch,id=selected){
   if(!original||(!patch.image&&!patch.shape&&id===null))return;
+  closeInline();
   await locked(async()=>{
     status('Updating PDF content…');await new Promise(resolve=>requestAnimationFrame(resolve));
     const before=snapshot();
@@ -227,3 +234,58 @@ $('imageFile').onchange=async e=>{
   }catch(e){status('Could not load image: '+e.message,true);}
 };
 $('insertShape').onclick=()=>applyContent({shape:true,x:40,y:40,width:140,height:80,color:$('color').value},null);
+
+function closeInline(){
+  if(!inlineEdit)return;
+  inlineEdit.host.remove();inlineEdit=null;$('objects').classList.remove('editing');
+}
+function startInline(item,event){
+  if(busy||inlineEdit)return;
+  const zoom=Number($('zoom').value),b=item.bounds,host=document.createElement('div');
+  host.className='inline-text-host';host.style.left=b[0]*zoom+'px';host.style.top=b[1]*zoom+'px';
+  host.style.width=Math.max(100,(b[2]-b[0])*zoom+20)+'px';
+  const editor=document.createElement('div');editor.id='inlineText';editor.className='inline-text';
+  editor.contentEditable='plaintext-only';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','Edit text on page');editor.setAttribute('aria-multiline','true');editor.spellcheck=false;
+  editor.style.fontSize=(item.size||18)*zoom+'px';editor.style.color=item.color;
+  editor.style.fontFamily=item.font?.includes('Times')?'Times New Roman, serif':item.font?.includes('Courier')?'Courier New, monospace':'Arial, sans-serif';
+  editor.style.minHeight=Math.max((b[3]-b[1])*zoom,(item.size||18)*zoom*1.3)+'px';
+  editor.textContent=item.text;
+  const bar=document.createElement('div');bar.className='inline-toolbar';
+  const done=document.createElement('button');done.textContent='Done';done.className='primary';done.type='button';
+  const cancel=document.createElement('button');cancel.textContent='Cancel';cancel.type='button';
+  const hint=document.createElement('span');hint.textContent='Ctrl/⌘ Enter saves · Esc cancels';
+  bar.append(done,cancel,hint);host.append(editor,bar);$('sheet').append(host);
+  inlineEdit={host,editor,item};$('objects').classList.add('editing');controls();
+  editor.oninput=()=>{$('objectText').value=editor.innerText;};
+  editor.onkeydown=e=>{
+    e.stopPropagation();
+    if(e.key==='Escape'){e.preventDefault();cancelInline();}
+    else if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();saveInline();}
+  };
+  editor.onpaste=e=>{e.preventDefault();document.execCommand('insertText',false,e.clipboardData.getData('text/plain'));};
+  done.onclick=saveInline;cancel.onclick=cancelInline;editor.focus({preventScroll:true});
+  const selection=window.getSelection();let range;
+  if(event?.clientX){
+    if(document.caretPositionFromPoint){
+      const p=document.caretPositionFromPoint(event.clientX,event.clientY);
+      if(p&&editor.contains(p.offsetNode)){range=document.createRange();range.setStart(p.offsetNode,p.offset);range.collapse(true);}
+    }else if(document.caretRangeFromPoint){
+      const r=document.caretRangeFromPoint(event.clientX,event.clientY);if(r&&editor.contains(r.startContainer))range=r;
+    }
+  }
+  if(!range){range=document.createRange();range.selectNodeContents(editor);range.collapse(false);}
+  selection.removeAllRanges();selection.addRange(range);
+  status('Edit letters directly here. Use Done to keep changes or Escape to cancel.');
+}
+function cancelInline(){
+  const item=inlineEdit?.item;closeInline();controls();if(item)selectObject(item.id);
+  status('Text edit canceled.');
+}
+async function saveInline(){
+  if(!inlineEdit||busy)return;
+  const {editor,item}=inlineEdit,text=editor.innerText.replace(/\r\n/g,'\n');
+  if(text===item.text){closeInline();controls();status('Text unchanged.');return;}
+  if(text.length>10000){status('Please keep this text block under 10,000 characters.',true);return;}
+  await applyContent({text,preserveFont:true},item.id);
+}
+$('objectText').addEventListener('input',()=>{if(inlineEdit)inlineEdit.editor.textContent=$('objectText').value;});

@@ -19,11 +19,11 @@ function describe(m,method,args,id){
   const bounds=type==='image'?m.Rect.transform([0,0,1,1],ctm):args[0].getBounds(method.startsWith('stroke')?args[1]:null,ctm);
   const item={id,type,bounds,method,color:hexColor(args[mi+2])};
   if(type==='text'){
-    let value='',first=null,last=null;
+    let value='',first=null,last=null;item.lineMatrices=[];
     args[0].walk({showGlyph(font,trm,gid,ucs){
       const matrix=m.Matrix.concat(trm,ctm),size=Math.hypot(matrix[0],matrix[1]);
-      if(!first){first=matrix;item.font=font.getName();item.size=size;}
-      if(last&&Math.abs(matrix[5]-last[5])>Math.max(2,size*.6))value+='\n';
+      if(!first){first=matrix;item.font=font.getName();item.size=size;item.lineMatrices.push(matrix);}
+      if(last&&Math.abs(matrix[5]-last[5])>Math.max(2,size*.6)){value+='\n';item.lineMatrices.push(matrix);}
       if(ucs>=0)value+=String.fromCodePoint(ucs);last=matrix;
     }});
     item.text=value;item.textMatrix=first;
@@ -73,18 +73,22 @@ export async function editContent(bytes,pageIndex,objectId,patch){
             const item=describe(m,method,args,objectId),mi=painting[method],ctm=args[mi],transform=transformFor(item,patch);
             if(item.type==='text'&&patch.text!==undefined){
               if(!item.textMatrix)throw new Error('This text has no editable characters.');
-              const font=new m.Font(patch.font||'Helvetica'),text=new m.Text();
+              let sourceFont;
+              if(patch.preserveFont)args[0].walk({showGlyph(font){sourceFont??=font;}});
+              const reuse=sourceFont&&[...patch.text].every(ch=>ch==='\n'||sourceFont.encodeCharacter(ch)>0);
+              const font=reuse?sourceFont:new m.Font(patch.font||'Helvetica'),text=new m.Text();
               try{
                 const trm=m.Matrix.concat(item.textMatrix,transform),oldSize=Math.hypot(trm[0],trm[1])||12;
                 const ratio=patch.size?patch.size/oldSize:1;
                 for(let k=0;k<4;k++)trm[k]*=ratio;
                 let line=0;
                 for(const str of patch.text.split('\n')){
-                  const matrix=[...trm];matrix[4]-=trm[2]*1.3*line;matrix[5]-=trm[3]*1.3*line;
+                  const matrix=patch.preserveFont&&item.lineMatrices[line]?[...item.lineMatrices[line]]:[...trm];
+                  if(!(patch.preserveFont&&item.lineMatrices[line])){matrix[4]-=trm[2]*1.3*line;matrix[5]-=trm[3]*1.3*line;}
                   text.showString(font,matrix,str);line++;
                 }
                 out.fillText(text,m.Matrix.identity,m.ColorSpace.DeviceRGB,color(patch.color||item.color),1);
-              }finally{text.destroy();font.destroy();}
+              }finally{text.destroy();if(!reuse)font.destroy();}
             }else if(item.type==='image'&&patch.image){
               const image=new m.Image(patch.image);
               try{out.fillImage(image,m.Matrix.concat(ctm,transform),1);}finally{image.destroy();}
