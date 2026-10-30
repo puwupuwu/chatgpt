@@ -31,8 +31,10 @@ test('text mode ignores overlapping shapes and supports direct typing and text-l
  await expect(editor).toHaveCount(0);await expect(page.locator('#objectW')).toBeVisible();
  const wait=page.waitForEvent('download');await page.locator('#export').click();const file=await wait;
  const items=(await listContent(await readFile(await file.path()),0)).items;
- expect(items.some(i=>i.text==='Original invoice edited')).toBeTruthy();
- expect(items.some(i=>i.text==='Keep this line ქართულად')).toBeTruthy();
+ const text=items.filter(i=>i.type==='text').map(i=>i.text).join('\n');
+ expect(text).toContain('Original invoice edited');
+ expect(text).toContain('Keep this line ქართულად');
+ expect(text).not.toContain('Original invoice edited edited');
 });
 
 test('text mode explains pages with no editable text',async({page})=>{

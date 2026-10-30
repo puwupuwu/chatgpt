@@ -277,7 +277,7 @@ function startInline(item,event){
   editor.contentEditable='plaintext-only';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','Edit text on page');editor.setAttribute('aria-multiline','true');editor.spellcheck=false;
   editor.style.fontSize=(item.size||18)*zoom+'px';editor.style.color=item.color;
   editor.style.fontFamily=item.font?.includes('Times')?'Times New Roman, serif':item.font?.includes('Courier')?'Courier New, monospace':'Arial, sans-serif';
-  editor.style.fontFamily='"Paperdesk Georgian", '+editor.style.fontFamily;
+  editor.style.fontFamily=editor.style.fontFamily.replace(', serif',', "Paperdesk Georgian", serif').replace(', monospace',', "Paperdesk Georgian", monospace').replace(', sans-serif',', "Paperdesk Georgian", sans-serif');
   if(hasGeorgian(item.text))editor.style.fontFamily='"Paperdesk Georgian", Arial, sans-serif';
   editor.style.minHeight=Math.max((b[3]-b[1])*zoom,(item.size||18)*zoom*1.3)+'px';
   editor.textContent=item.text;
