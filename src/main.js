@@ -3,17 +3,20 @@ import * as pdfjs from 'pdfjs-dist';
 import worker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { inspect, buildPdf, samplePdf } from './pdf.js';
 import { listContent, editContent } from './content.js';
+import {hasGeorgian,loadGeorgianFont} from './fonts.js';
+import {stampMaker} from './stamps.js';
 pdfjs.GlobalWorkerOptions.workerSrc=worker;
 const $=id=>document.getElementById(id);
 let original=null,pages=[],current=0,tool='text',busy=false,viewport,history=[],future=[],dirty=false,name='document.pdf',gesture=null,point=null;
 let inlineEdit=null;
+let pendingStamp=null;
 let renderedBytes=null,contentItems=[],selected=null,objectDrag=null,imageMode='insert';
 const copy=x=>structuredClone(x);
 const status=(message,error=false)=>{$('status').textContent=message;$('status').classList.toggle('error',error);};
 function controls(){
   const editing=!!inlineEdit;
   $('objectList').disabled=busy||editing;
-  for(const id of ['insertImage','insertShape','applyObject','removeObject','replaceImage'])$(id).disabled=busy||!original||editing;
+  for(const id of ['openStamps','insertImage','insertShape','applyObject','removeObject','replaceImage'])$(id).disabled=busy||!original||editing;
   $('applyObject').disabled=busy||!original;
   for(const id of ['export','rotate','delete','moveLeft','moveRight','prev','next']) $(id).disabled=busy||!pages.length||editing;
   $('delete').disabled=busy||editing||pages.length<2;
@@ -77,7 +80,7 @@ document.addEventListener('dragleave',()=>$('empty').classList.remove('dragging'
 document.addEventListener('drop',e=>{e.preventDefault();$('empty').classList.remove('dragging');openFile(e.dataTransfer.files[0]);});
 for(const button of document.querySelectorAll('[data-tool]'))button.onclick=async()=>{
   if(busy)return;
-  tool=button.dataset.tool;
+  pendingStamp=null;tool=button.dataset.tool;
   for(const b of document.querySelectorAll('[data-tool]')){b.classList.toggle('selected',b===button);b.setAttribute('aria-pressed',String(b===button));}
   $('contentPanel').hidden=tool!=='select';$('objects').hidden=tool!=='select';$('ink').style.pointerEvents=tool==='select'?'none':'auto';
   if(tool==='select'&&original)await locked(refreshContent);
@@ -96,7 +99,7 @@ async function travel(from,to){if(!from.length)return;await locked(async()=>{
 });}
 $('undo').onclick=()=>travel(history,future);$('redo').onclick=()=>travel(future,history);
 document.addEventListener('keydown',e=>{
-  if(e.target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||$('textDialog').open)return;
+  if($('stampDialog').open||e.target.isContentEditable||['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||$('textDialog').open)return;
   if(tool==='select'&&selected!==null&&(e.key==='Delete'||e.key==='Backspace')){e.preventDefault();applyContent({remove:true});return;}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?travel(future,history):travel(history,future);}
 });
@@ -104,6 +107,13 @@ function pos(e){const r=$('ink').getBoundingClientRect();return [Math.max(0,Math
 $('ink').onpointerdown=e=>{
   if(busy||!original||e.button!==0||tool==='select')return;
   const p=pos(e);
+  if(tool==='stamp'){
+    if(!pendingStamp)return;const stamp=pendingStamp;pendingStamp=null;
+    const zoom=Number($('zoom').value),width=stamp.width,height=stamp.width*stamp.height/stamp.pixelWidth;
+    tool='select';$('contentPanel').hidden=false;$('objects').hidden=false;$('ink').style.pointerEvents='none';
+    for(const b of document.querySelectorAll('[data-tool]')){b.classList.toggle('selected',b.dataset.tool==='select');b.setAttribute('aria-pressed',String(b.dataset.tool==='select'));}
+    applyContent({image:stamp.image,x:Math.max(0,Math.min(p[0]/zoom,viewport.width/zoom-width)),y:Math.max(0,Math.min(p[1]/zoom,viewport.height/zoom-height)),width,height},null);return;
+  }
   if(tool==='text'){point=viewport.convertToPdfPoint(...p);$('textValue').value='';$('textDialog').returnValue='';$('textDialog').showModal();$('textValue').focus();return;}
   $('ink').setPointerCapture(e.pointerId);gesture={tool,points:[p],id:e.pointerId,color:$('color').value};
 };
@@ -184,7 +194,7 @@ function selectObject(id){
   for(const [key,val] of Object.entries({objectX:x,objectY:y,objectW:Math.max(1,x2-x),objectH:Math.max(1,y2-y)}))$(key).value=val.toFixed(1);
   $('textProperties').hidden=item.type!=='text';$('replaceImage').hidden=item.type!=='image';$('objectColorLabel').hidden=item.type==='image';
   $('objectText').value=item.text||'';$('objectSize').value=Math.round(item.size||18);$('objectColor').value=item.color;
-  $('objectFont').value=item.font?.includes('Times')?'Times-Roman':item.font?.includes('Courier')?'Courier':'Helvetica';
+  $('objectFont').value=hasGeorgian(item.text||'')?'Noto Sans Georgian':item.font?.includes('Times')?'Times-Roman':item.font?.includes('Courier')?'Courier':'Helvetica';
 }
 $('objectList').onchange=e=>{if(e.target.value!=='')selectObject(Number(e.target.value));};
 function geometry(){
@@ -248,6 +258,8 @@ function startInline(item,event){
   editor.contentEditable='plaintext-only';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','Edit text on page');editor.setAttribute('aria-multiline','true');editor.spellcheck=false;
   editor.style.fontSize=(item.size||18)*zoom+'px';editor.style.color=item.color;
   editor.style.fontFamily=item.font?.includes('Times')?'Times New Roman, serif':item.font?.includes('Courier')?'Courier New, monospace':'Arial, sans-serif';
+  editor.style.fontFamily+=', "Paperdesk Georgian"';
+  if(hasGeorgian(item.text))editor.style.fontFamily='"Paperdesk Georgian", Arial, sans-serif';
   editor.style.minHeight=Math.max((b[3]-b[1])*zoom,(item.size||18)*zoom*1.3)+'px';
   editor.textContent=item.text;
   const bar=document.createElement('div');bar.className='inline-toolbar';
@@ -256,7 +268,7 @@ function startInline(item,event){
   const hint=document.createElement('span');hint.textContent='Ctrl/⌘ Enter saves · Esc cancels';
   bar.append(done,cancel,hint);host.append(editor,bar);$('sheet').append(host);
   inlineEdit={host,editor,item};$('objects').classList.add('editing');controls();
-  editor.oninput=()=>{$('objectText').value=editor.innerText;};
+  editor.oninput=()=>{$('objectText').value=editor.innerText;if(hasGeorgian(editor.innerText))editor.style.fontFamily='"Paperdesk Georgian", Arial, sans-serif';};
   editor.onkeydown=e=>{
     e.stopPropagation();
     if(e.key==='Escape'){e.preventDefault();cancelInline();}
@@ -289,3 +301,11 @@ async function saveInline(){
   await applyContent({text,preserveFont:true},item.id);
 }
 $('objectText').addEventListener('input',()=>{if(inlineEdit)inlineEdit.editor.textContent=$('objectText').value;});
+
+loadGeorgianFont().catch(error=>status(error.message,true));
+stampMaker(async stamp=>{
+ if(busy||!original||inlineEdit)return;
+ pendingStamp=stamp;tool='stamp';$('contentPanel').hidden=true;$('objects').hidden=true;$('ink').style.pointerEvents='auto';
+ for(const b of document.querySelectorAll('[data-tool]')){b.classList.remove('selected');b.setAttribute('aria-pressed','false');}
+ status('Click on the page to place your stamp. Choose another tool to cancel.');
+});

@@ -1,3 +1,5 @@
+import fontkit from '@pdf-lib/fontkit';
+import {hasGeorgian,georgianFontBytes} from './fonts.js';
 import { PDFDocument, StandardFonts, rgb, degrees } from 'pdf-lib';
 export async function inspect(bytes) {
   const doc = await PDFDocument.load(bytes);
@@ -8,12 +10,12 @@ export async function buildPdf(bytes,pages) {
   if (!pages.length) throw new Error('Keep at least one page.');
   const source=await PDFDocument.load(bytes);
   const doc=await PDFDocument.create();
-  const font=await doc.embedFont(StandardFonts.Helvetica);
+  const font=await doc.embedFont(StandardFonts.Helvetica);doc.registerFontkit(fontkit);let georgian;
   const copies=await doc.copyPages(source,pages.map(p=>p.index));
   for(let i=0;i<copies.length;i++){
     const p=copies[i]; doc.addPage(p); p.setRotation(degrees(pages[i].rotation));
     for(const a of pages[i].annotations){
-      if(a.type==='text') p.drawText(a.text,{x:a.x,y:a.y,size:a.size,font,color:color(a.color),lineHeight:a.size*1.3});
+      if(a.type==='text') {const selectedFont=hasGeorgian(a.text)?(georgian??=await doc.embedFont(await georgianFontBytes(),{subset:true})):font;p.drawText(a.text,{x:a.x,y:a.y,size:a.size,font:selectedFont,color:color(a.color),lineHeight:a.size*1.3});}
       if(a.type==='highlight') p.drawRectangle({x:a.x,y:a.y,width:a.width,height:a.height,color:rgb(1,0.8,0.15),opacity:0.32});
       if(a.type==='pen') for(let j=1;j<a.points.length;j++) p.drawLine({start:{x:a.points[j-1][0],y:a.points[j-1][1]},end:{x:a.points[j][0],y:a.points[j][1]},thickness:2,color:color(a.color)});
     }
