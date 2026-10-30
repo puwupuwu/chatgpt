@@ -36,3 +36,12 @@ test('rotated cropped pages preserve displayed bounds during editing',async()=>{
  const output=await editContent(bytes,0,item.id,{remove:true}),after=await listContent(output,0);
  assert.deepEqual(after.bounds,scene.bounds);assert.equal((await PDFDocument.load(output)).getPageCount(),1);
 });
+
+test('inline replacement preserves font size and starting position',async()=>{
+ const bytes=await fixture(),item=(await listContent(bytes,0)).items.find(i=>i.text==='Original invoice');
+ const output=await editContent(bytes,0,item.id,{text:'Original receipt',preserveFont:true});
+ const changed=(await listContent(output,0)).items.find(i=>i.text==='Original receipt');
+ assert.ok(changed);assert.ok(Math.abs(changed.size-item.size)<.01);
+ assert.ok(Math.abs(changed.textMatrix[4]-item.textMatrix[4])<.01);
+ assert.ok(Math.abs(changed.textMatrix[5]-item.textMatrix[5])<.01);
+});
