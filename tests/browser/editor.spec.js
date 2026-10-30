@@ -1,0 +1,52 @@
+import {test,expect} from '@playwright/test';
+import {PDFDocument} from 'pdf-lib';
+import {readFile} from 'node:fs/promises';
+test('edit, undo, highlight, sign, rotate, organize and export',async({page})=>{
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('/');
+ await page.getByRole('button',{name:'Try a sample document'}).click();
+ await expect(page.locator('#position')).toHaveText('1 / 2');
+ await expect(page.locator('#export')).toBeEnabled();
+ await page.locator('#ink').click({position:{x:100,y:150}});
+ await page.locator('#textValue').fill('Approved by Paperdesk');
+ await page.locator('#addText').click();
+ await expect(page.locator('#undo')).toBeEnabled();
+ await page.locator('#undo').click();await expect(page.locator('#redo')).toBeEnabled();
+ await page.locator('#redo').click();await expect(page.locator('#export')).toBeEnabled();
+ await page.getByRole('button',{name:'Highlight',exact:true}).click();
+ let box=await page.locator('#ink').boundingBox();
+ await page.mouse.move(box.x+60,box.y+110);await page.mouse.down();await page.mouse.move(box.x+280,box.y+130,{steps:8});await page.mouse.up();
+ await expect(page.locator('#export')).toBeEnabled();
+ await page.getByRole('button',{name:'Draw / sign'}).click();
+ await page.mouse.move(box.x+70,box.y+220);await page.mouse.down();await page.mouse.move(box.x+180,box.y+250,{steps:10});await page.mouse.up();
+ await expect(page.locator('#export')).toBeEnabled();
+ await page.locator('#rotate').click();await expect(page.locator('#export')).toBeEnabled();
+ await page.locator('#moveRight').click();await expect(page.locator('#position')).toHaveText('2 / 2');
+ await expect(page.locator('#prev')).toBeEnabled();await page.locator('#prev').click();await expect(page.locator('#delete')).toBeEnabled();
+ await page.locator('#delete').click();await expect(page.locator('#position')).toHaveText('1 / 1');
+ await expect(page.locator('#export')).toBeEnabled();
+ const downloadPromise=page.waitForEvent('download');await page.locator('#export').click();const download=await downloadPromise;
+ const bytes=await readFile(await download.path()),pdf=await PDFDocument.load(bytes);
+ expect(pdf.getPageCount()).toBe(1);expect(pdf.getPage(0).getRotation().angle).toBe(90);
+ await page.locator('#file').setInputFiles({name:'exported.pdf',mimeType:'application/pdf',buffer:bytes});
+ await expect(page.locator('#filename')).toHaveText('exported.pdf');await expect(page.locator('#export')).toBeEnabled();
+ const text=await page.evaluate(async()=>{
+  const pdfjs=await import('/node_modules/pdfjs-dist/build/pdf.mjs');
+  const {samplePdf,inspect,buildPdf}=await import('/src/pdf.js');
+  const original=await samplePdf(),pages=await inspect(original);
+  pages[0].annotations.push({type:'text',text:'Roundtrip check',x:40,y:40,size:16,color:'#000000'});
+  const doc=await pdfjs.getDocument({data:await buildPdf(original,pages)}).promise;
+  const p=await doc.getPage(1),content=await p.getTextContent();await doc.destroy();return content.items.map(x=>x.str).join(' ');
+ });
+ expect(text).toContain('Roundtrip check');expect(errors).toEqual([]);
+});
+test('invalid PDF shows a recoverable error',async({page})=>{
+ await page.goto('/');await page.locator('#file').setInputFiles({name:'bad.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a PDF')});
+ await expect(page.locator('#status')).toContainText('Could not complete');
+ await page.locator('#sample').click();await expect(page.locator('#export')).toBeEnabled();
+});
+test('mobile layout keeps controls accessible',async({page})=>{
+ await page.setViewportSize({width:390,height:844});await page.goto('/');
+ await expect(page.locator('#choose')).toBeVisible();
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
+});

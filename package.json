@@ -1,0 +1,21 @@
+{
+  "name": "paperdesk",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build --base=./",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --test tests/pdf.test.js",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "4.10.38"
+  },
+  "devDependencies": {
+    "vite": "6.4.1",
+    "@playwright/test": "1.56.1"
+  }
+}
