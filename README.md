@@ -34,4 +34,4 @@ Use **Stamps / ბეჭედი** to choose Approved, Received, Copy, or Draft
 
 Stamps are exported as high-resolution images, not digital certificates or searchable text. Up to 12 stamps can be saved in this browser's local storage and removed from the stamp dialog. Saved stamps do not sync between devices; clearing browser storage removes them. Dates are fixed when the stamp is created; changing a preset/date generates a new stamp.
 
-Noto Sans Georgian is distributed under the SIL Open Font License. Font source is pinned to notofonts/noto-fonts commit ffebf8c1ee449e544955a7e813c54f9b73848eac; the build bundles its license beside the font at vendor/fonts/OFL.txt.
+Noto Sans Georgian is distributed under the SIL Open Font License. Font source is pinned to google/fonts commit 8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5; the build bundles its license beside the font at vendor/fonts/OFL.txt.
