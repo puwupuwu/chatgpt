@@ -20,3 +20,8 @@ jobs:
         with:
           name: paperdesk-site
           path: dist
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-test-results
+          path: test-results

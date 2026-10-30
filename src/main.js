@@ -2,12 +2,15 @@ import './style.css';
 import * as pdfjs from 'pdfjs-dist';
 import worker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { inspect, buildPdf, samplePdf } from './pdf.js';
+import { listContent, editContent } from './content.js';
 pdfjs.GlobalWorkerOptions.workerSrc=worker;
 const $=id=>document.getElementById(id);
 let original=null,pages=[],current=0,tool='text',busy=false,viewport,history=[],future=[],dirty=false,name='document.pdf',gesture=null,point=null;
+let renderedBytes=null,contentItems=[],selected=null,objectDrag=null,imageMode='insert';
 const copy=x=>structuredClone(x);
 const status=(message,error=false)=>{$('status').textContent=message;$('status').classList.toggle('error',error);};
 function controls(){
+  for(const id of ['insertImage','insertShape','applyObject','removeObject','replaceImage'])$(id).disabled=busy||!original;
   for(const id of ['export','rotate','delete','moveLeft','moveRight','prev','next']) $(id).disabled=busy||!pages.length;
   $('delete').disabled=busy||pages.length<2;
   $('prev').disabled=$('moveLeft').disabled=busy||current===0;
@@ -25,6 +28,7 @@ async function locked(fn){
 }
 async function render(){
   const data=await buildPdf(original,pages);
+  renderedBytes=data.slice();selected=null;contentItems=[];$('objects').replaceChildren();$('properties').hidden=true;
   const doc=await pdfjs.getDocument({data:data.slice(),isEvalSupported:false}).promise;
   try{
     const p=await doc.getPage(current+1);
@@ -35,6 +39,7 @@ async function render(){
     overlay.width=Math.ceil(viewport.width);overlay.height=Math.ceil(viewport.height);
     await p.render({canvasContext:canvas.getContext('2d'),viewport,transform:[ratio,0,0,ratio,0,0]}).promise;
   }finally{await doc.destroy();}
+  if(tool==='select')await refreshContent();
   controls();
 }
 async function openBytes(bytes,filename){
@@ -52,11 +57,11 @@ async function openFile(file){if(!file)return;await locked(async()=>{
   status('Opening PDF…');
   await openBytes(new Uint8Array(await file.arrayBuffer()),file.name);
 });}
-function snapshot(){return {pages:copy(pages),current};}
+function snapshot(){return {original,pages:copy(pages),current};}
 async function change(fn){await locked(async()=>{
   const before=snapshot();fn();
   try{await render();history.push(before);if(history.length>50)history.shift();future=[];dirty=true;status('Edit applied. Export to save a copy.');}
-  catch(e){pages=before.pages;current=before.current;await render();throw e;}
+  catch(e){original=before.original;pages=before.pages;current=before.current;await render();throw e;}
 });}
 $('open').onclick=$('choose').onclick=()=>$('file').click();
 $('file').onchange=async e=>{await openFile(e.target.files[0]);e.target.value='';};
@@ -64,10 +69,13 @@ $('sample').onclick=()=>locked(async()=>openBytes(await samplePdf(),'welcome.pdf
 document.addEventListener('dragover',e=>{e.preventDefault();$('empty').classList.add('dragging');});
 document.addEventListener('dragleave',()=>$('empty').classList.remove('dragging'));
 document.addEventListener('drop',e=>{e.preventDefault();$('empty').classList.remove('dragging');openFile(e.dataTransfer.files[0]);});
-for(const button of document.querySelectorAll('[data-tool]'))button.onclick=()=>{
+for(const button of document.querySelectorAll('[data-tool]'))button.onclick=async()=>{
+  if(busy)return;
   tool=button.dataset.tool;
   for(const b of document.querySelectorAll('[data-tool]')){b.classList.toggle('selected',b===button);b.setAttribute('aria-pressed',String(b===button));}
-  $('hint').textContent={text:'Click on the page to place a text note.',highlight:'Drag across the area you want to highlight.',pen:'Draw with your mouse, pen, or finger to add a signature.'}[tool];
+  $('contentPanel').hidden=tool!=='select';$('objects').hidden=tool!=='select';$('ink').style.pointerEvents=tool==='select'?'none':'auto';
+  if(tool==='select'&&original)await locked(refreshContent);
+  $('hint').textContent={select:'Select existing text, images, or vector shapes. Use the properties panel to edit them.',text:'Click on the page to place a text note.',highlight:'Drag across the area you want to highlight.',pen:'Draw with your mouse, pen, or finger to add a signature.'}[tool];
 };
 $('zoom').onchange=()=>{if(original)locked(render);};
 $('prev').onclick=()=>locked(async()=>{current--;await render();});
@@ -77,17 +85,18 @@ $('delete').onclick=()=>change(()=>{if(pages.length>1){pages.splice(current,1);c
 $('moveLeft').onclick=()=>change(()=>{[pages[current-1],pages[current]]=[pages[current],pages[current-1]];current--;});
 $('moveRight').onclick=()=>change(()=>{[pages[current+1],pages[current]]=[pages[current],pages[current+1]];current++;});
 async function travel(from,to){if(!from.length)return;await locked(async()=>{
-  const before=snapshot(),next=from[from.length-1];pages=copy(next.pages);current=next.current;
+  const before=snapshot(),next=from[from.length-1];original=next.original;pages=copy(next.pages);current=next.current;
   try{await render();from.pop();to.push(before);dirty=true;status('History restored.');}catch(e){pages=before.pages;current=before.current;await render();throw e;}
 });}
 $('undo').onclick=()=>travel(history,future);$('redo').onclick=()=>travel(future,history);
 document.addEventListener('keydown',e=>{
   if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)||$('textDialog').open)return;
+  if(tool==='select'&&selected!==null&&(e.key==='Delete'||e.key==='Backspace')){e.preventDefault();applyContent({remove:true});return;}
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?travel(future,history):travel(history,future);}
 });
 function pos(e){const r=$('ink').getBoundingClientRect();return [Math.max(0,Math.min(viewport.width,(e.clientX-r.left)*viewport.width/r.width)),Math.max(0,Math.min(viewport.height,(e.clientY-r.top)*viewport.height/r.height))];}
 $('ink').onpointerdown=e=>{
-  if(busy||!original||e.button!==0)return;
+  if(busy||!original||e.button!==0||tool==='select')return;
   const p=pos(e);
   if(tool==='text'){point=viewport.convertToPdfPoint(...p);$('textValue').value='';$('textDialog').returnValue='';$('textDialog').showModal();$('textValue').focus();return;}
   $('ink').setPointerCapture(e.pointerId);gesture={tool,points:[p],id:e.pointerId,color:$('color').value};
@@ -125,3 +134,96 @@ $('export').onclick=()=>locked(async()=>{
 });
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 controls();
+
+function objectLabel(item){return item.type==='text'?'Text: '+item.text.replace(/\s+/g,' ').slice(0,70):item.type==='image'?'Image '+(item.id+1):'Vector shape '+(item.id+1);}
+async function refreshContent(){
+  if(!renderedBytes)return;
+  status('Reading editable content…');
+  const result=await listContent(renderedBytes,current);contentItems=result.items;
+  const list=$('objectList');list.replaceChildren(new Option('Select an object…',''));
+  for(const item of contentItems)list.add(new Option(objectLabel(item),String(item.id)));
+  paintObjects();status(contentItems.length+' editable objects. Select one to edit.');
+}
+function paintObjects(){
+  const root=$('objects');root.replaceChildren();const zoom=Number($('zoom').value);
+  for(const item of contentItems){
+    const b=item.bounds,button=document.createElement('button');button.className='object-box';
+    button.dataset.objectId=item.id;button.dataset.objectType=item.type;button.title=objectLabel(item);button.setAttribute('aria-label',objectLabel(item));
+    button.style.cssText='left:'+b[0]*zoom+'px;top:'+b[1]*zoom+'px;width:'+Math.max(6,(b[2]-b[0])*zoom)+'px;height:'+Math.max(6,(b[3]-b[1])*zoom)+'px';
+    const grip=document.createElement('span');grip.className='resize-grip';button.append(grip);
+    button.onclick=()=>{if(!busy)selectObject(item.id);};
+    button.onpointerdown=e=>{
+      if(busy||e.button!==0)return;e.preventDefault();selectObject(item.id);button.setPointerCapture(e.pointerId);
+      objectDrag={id:item.id,start:[e.clientX,e.clientY],bounds:[...b],resize:e.target===grip,button,changed:false,pointer:e.pointerId};
+    };
+    button.onpointermove=e=>{
+      if(!objectDrag||objectDrag.pointer!==e.pointerId)return;
+      const d=objectDrag,dx=(e.clientX-d.start[0])/zoom,dy=(e.clientY-d.start[1])/zoom;
+      if(Math.abs(dx)+Math.abs(dy)<2&&!d.changed)return;
+      d.changed=true;
+      if(d.resize){$('objectW').value=Math.max(1,d.bounds[2]-d.bounds[0]+dx).toFixed(1);$('objectH').value=Math.max(1,d.bounds[3]-d.bounds[1]+dy).toFixed(1);}
+      else{$('objectX').value=(d.bounds[0]+dx).toFixed(1);$('objectY').value=(d.bounds[1]+dy).toFixed(1);}
+      button.style.left=$('objectX').value*zoom+'px';button.style.top=$('objectY').value*zoom+'px';button.style.width=$('objectW').value*zoom+'px';button.style.height=$('objectH').value*zoom+'px';
+    };
+    button.onpointerup=()=>{const d=objectDrag;objectDrag=null;if(d?.changed)applyContent(geometry());};
+    button.onpointercancel=()=>{objectDrag=null;paintObjects();if(selected!==null)selectObject(selected);};
+    root.append(button);
+  }
+}
+function selectObject(id){
+  const item=contentItems.find(i=>i.id===id);if(!item)return;
+  selected=id;$('properties').hidden=false;$('objectList').value=String(id);$('objectType').textContent=objectLabel(item);
+  for(const b of $('objects').children)b.classList.toggle('active',Number(b.dataset.objectId)===id);
+  const [x,y,x2,y2]=item.bounds;
+  for(const [key,val] of Object.entries({objectX:x,objectY:y,objectW:Math.max(1,x2-x),objectH:Math.max(1,y2-y)}))$(key).value=val.toFixed(1);
+  $('textProperties').hidden=item.type!=='text';$('replaceImage').hidden=item.type!=='image';$('objectColorLabel').hidden=item.type==='image';
+  $('objectText').value=item.text||'';$('objectSize').value=Math.round(item.size||18);$('objectColor').value=item.color;
+  $('objectFont').value=item.font?.includes('Times')?'Times-Roman':item.font?.includes('Courier')?'Courier':'Helvetica';
+}
+$('objectList').onchange=e=>{if(e.target.value!=='')selectObject(Number(e.target.value));};
+function geometry(){
+  const patch={x:Number($('objectX').value),y:Number($('objectY').value),width:Number($('objectW').value),height:Number($('objectH').value)};
+  if(!Object.values(patch).every(Number.isFinite)||patch.width<=0||patch.height<=0)throw new Error('Use finite positions and positive dimensions.');
+  return patch;
+}
+async function applyContent(patch,id=selected){
+  if(!original||(!patch.image&&!patch.shape&&id===null))return;
+  await locked(async()=>{
+    status('Updating PDF content…');await new Promise(resolve=>requestAnimationFrame(resolve));
+    const before=snapshot();
+    try{
+      const bytes=await editContent(renderedBytes,current,id,patch);
+      original=bytes;pages=await inspect(bytes);
+      await render();history.push(before);if(history.length>30)history.shift();future=[];dirty=true;
+      status('Content updated. Export to save your changes.');
+    }catch(e){original=before.original;pages=before.pages;current=before.current;await render();throw e;}
+  });
+}
+$('applyObject').onclick=()=>{
+  try{
+    const item=contentItems.find(i=>i.id===selected);if(!item)return;
+    const patch=geometry();
+    if(item.type!=='image')patch.color=$('objectColor').value;
+    if(item.type==='text'){
+      patch.text=$('objectText').value;patch.font=$('objectFont').value;patch.size=Number($('objectSize').value);
+      if(!Number.isFinite(patch.size)||patch.size<4||patch.size>200)throw new Error('Font size must be between 4 and 200.');
+    }
+    applyContent(patch);
+  }catch(e){status(e.message,true);}
+};
+$('removeObject').onclick=()=>applyContent({remove:true});
+$('insertImage').onclick=()=>{imageMode='insert';$('imageFile').click();};
+$('replaceImage').onclick=()=>{imageMode='replace';$('imageFile').click();};
+$('imageFile').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file||busy)return;
+  try{
+    if(!['image/png','image/jpeg'].includes(file.type)||file.size>20*1024*1024)throw new Error('Choose a PNG or JPEG image smaller than 20 MB.');
+    const image=new Uint8Array(await file.arrayBuffer());
+    if(imageMode==='replace')await applyContent({image});
+    else{
+      const bitmap=await createImageBitmap(file);const width=Math.min(200,viewport.width/Number($('zoom').value)-40),height=width*bitmap.height/bitmap.width;bitmap.close();
+      await applyContent({image,x:20,y:20,width,height},null);
+    }
+  }catch(e){status('Could not load image: '+e.message,true);}
+};
+$('insertShape').onclick=()=>applyContent({shape:true,x:40,y:40,width:140,height:80,color:$('color').value},null);
