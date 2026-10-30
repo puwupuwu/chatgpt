@@ -24,4 +24,14 @@ Content editing replays PDF painting operations into a new vector PDF: the selec
 Paperdesk is AGPL-3.0-or-later and includes MuPDF.js from Artifex under that license. The running app links to its corresponding public source. MuPDF's upstream source is https://github.com/ArtifexSoftware/mupdf/tree/1.28.1/platform/wasm . Other dependencies retain their licenses.
 
 ## Scope
-**Add text** creates annotations; **Edit content** rewrites existing page content. Highlights are visual annotations, not redaction. Signatures are freehand ink, not cryptographic signatures. Added text uses the PDF standard Helvetica font (Western Latin characters). Encrypted/password-protected PDFs are rejected. Exports flatten new annotations into page content. Embedded original content is preserved, but document-level features such as bookmarks, digital signatures, and interactive forms are not guaranteed by page copying. Export a copy and retain your original.
+**Add text** creates annotations; **Edit content** rewrites existing page content. Highlights are visual annotations, not redaction. Signatures are freehand ink, not cryptographic signatures. Added text uses Helvetica for Western Latin characters and embedded Noto Sans Georgian for Georgian. Encrypted/password-protected PDFs are rejected. Exports flatten new annotations into page content. Embedded original content is preserved, but document-level features such as bookmarks, digital signatures, and interactive forms are not guaranteed by page copying. Export a copy and retain your original.
+
+## Georgian text
+Georgian Mkhedruli and Mtavruli are supported in added text, replacement text, and direct inline editing. Noto Sans Georgian is automatically embedded when required and is also available in the font selector. The font is bundled with the deployed app; readers do not need to install it. This adds Georgian document text support, not a full Georgian translation of every menu. Scanned text still needs OCR.
+
+## Stamps
+Use **Stamps / ბეჭედი** to choose Approved, Received, Copy, or Draft presets, enter custom Georgian/English wording, include a date, or upload a PNG/JPEG seal. Click **Place stamp**, then click the page. Transparent PNGs preserve transparency. Use Edit content to move, resize, replace, or delete the placed stamp; PDF undo/redo also works.
+
+Stamps are exported as high-resolution images, not digital certificates or searchable text. Up to 12 stamps can be saved in this browser's local storage and removed from the stamp dialog. Saved stamps do not sync between devices; clearing browser storage removes them. Dates are fixed when the stamp is created; changing a preset/date generates a new stamp.
+
+Noto Sans Georgian is distributed under the SIL Open Font License. Font source is pinned to google/fonts commit 8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5; the build bundles its license beside the font at vendor/fonts/OFL.txt.

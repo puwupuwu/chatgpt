@@ -1,3 +1,4 @@
+import {hasGeorgian,georgianFontBytes} from './fonts.js';
 // SPDX-License-Identifier: AGPL-3.0-or-later
 let pending;
 async function engine(){
@@ -52,6 +53,7 @@ export async function listContent(bytes,pageIndex){
 // Replay drawing commands into a new vector PDF. A selected paint operation is
 // removed/replaced at its original stacking position; unrelated content is forwarded.
 export async function editContent(bytes,pageIndex,objectId,patch){
+  const georgian=patch.text!==undefined&&(hasGeorgian(patch.text)||patch.font==='Noto Sans Georgian')?await georgianFontBytes():null;
   const m=await engine(),doc=m.Document.openDocument(bytes,'application/pdf'),buffer=new m.Buffer();
   const writer=new m.DocumentWriter(buffer,'PDF','compress');
   let found=objectId==null;
@@ -76,7 +78,7 @@ export async function editContent(bytes,pageIndex,objectId,patch){
               let sourceFont;
               if(patch.preserveFont)args[0].walk({showGlyph(font){sourceFont??=font;}});
               const reuse=sourceFont&&[...patch.text].every(ch=>ch==='\n'||sourceFont.encodeCharacter(ch)>0);
-              const font=reuse?sourceFont:new m.Font(patch.font||'Helvetica'),text=new m.Text();
+              const font=reuse?sourceFont:georgian?new m.Font('NotoSansGeorgian',georgian):new m.Font(patch.font||'Helvetica'),text=new m.Text();
               try{
                 const trm=m.Matrix.concat(item.textMatrix,transform),oldSize=Math.hypot(trm[0],trm[1])||12;
                 const ratio=patch.size?patch.size/oldSize:1;
