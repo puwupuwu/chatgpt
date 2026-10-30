@@ -12,6 +12,7 @@ const copy=x=>structuredClone(x);
 const status=(message,error=false)=>{$('status').textContent=message;$('status').classList.toggle('error',error);};
 function controls(){
   const editing=!!inlineEdit;
+  $('objectList').disabled=busy||editing;
   for(const id of ['insertImage','insertShape','applyObject','removeObject','replaceImage'])$(id).disabled=busy||!original||editing;
   $('applyObject').disabled=busy||!original;
   for(const id of ['export','rotate','delete','moveLeft','moveRight','prev','next']) $(id).disabled=busy||!pages.length||editing;
@@ -48,7 +49,7 @@ async function render(){
   controls();
 }
 async function openBytes(bytes,filename){
-  if(dirty&&!confirm('Open a new PDF and discard your unexported edits?'))return;
+  if((dirty||inlineEdit)&&!confirm('Open a new PDF and discard your unexported edits?'))return;
   const next=await inspect(bytes);
   if(!next.length)throw new Error('This PDF has no pages.');
   const old={original,pages,current,name,history,future,dirty};
@@ -91,7 +92,7 @@ $('moveLeft').onclick=()=>change(()=>{[pages[current-1],pages[current]]=[pages[c
 $('moveRight').onclick=()=>change(()=>{[pages[current+1],pages[current]]=[pages[current],pages[current+1]];current++;});
 async function travel(from,to){if(!from.length)return;await locked(async()=>{
   const before=snapshot(),next=from[from.length-1];original=next.original;pages=copy(next.pages);current=next.current;
-  try{await render();from.pop();to.push(before);dirty=true;status('History restored.');}catch(e){pages=before.pages;current=before.current;await render();throw e;}
+  try{await render();from.pop();to.push(before);dirty=true;status('History restored.');}catch(e){original=before.original;pages=before.pages;current=before.current;await render();throw e;}
 });}
 $('undo').onclick=()=>travel(history,future);$('redo').onclick=()=>travel(future,history);
 document.addEventListener('keydown',e=>{

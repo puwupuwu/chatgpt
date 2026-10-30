@@ -21,3 +21,5 @@
 .inline-toolbar{display:flex;align-items:center;gap:6px;margin-top:7px;background:white;border:1px solid #cbd9c9;border-radius:7px;box-shadow:0 3px 15px #213f2422;padding:5px;width:max-content;max-width:100%;flex-wrap:wrap}
 .inline-toolbar button{font:12px system-ui,sans-serif;padding:6px 10px}
 .inline-toolbar span{font:10px system-ui,sans-serif;color:#50664d;padding:3px}
+
+.inline-text{white-space:pre;max-width:none}
