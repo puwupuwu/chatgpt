@@ -31,3 +31,6 @@ input,textarea,select{font-family:system-ui,"Paperdesk Georgian",sans-serif}
 #stampDialog .check-label{display:flex;align-items:center;gap:8px;margin:10px 0}
 .stamp-preview{background:repeating-conic-gradient(#eef1eb 0% 25%,white 0% 50%) 50%/16px 16px;padding:24px;min-height:120px;margin:14px 0;display:grid;place-items:center;border:1px solid #d4ddce;border-radius:8px}
 .stamp-preview img{max-width:100%;max-height:150px}#stampStatus{font-size:12px;color:#7c4130}
+
+#objects.text-mode .object-box{cursor:text;touch-action:manipulation;border-color:#397f6255}
+#objects.text-mode .object-box:hover{background:#b7dcca33;border-color:#267052}

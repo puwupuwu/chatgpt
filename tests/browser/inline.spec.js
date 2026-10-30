@@ -7,7 +7,7 @@ test('edits individual letters inline with caret, selection, cancel, undo and ex
  await page.goto('/');
  await page.locator('#file').setInputFiles({name:'invoice.pdf',mimeType:'application/pdf',buffer:Buffer.from(await fixture())});
  await expect(page.locator('#export')).toBeEnabled();
- await page.locator('[data-tool="select"]').click();
+ await page.locator('[data-tool="edit-text"]').click();
  await page.getByRole('button',{name:'Text: Original invoice',exact:true}).click();
  const editor=page.getByRole('textbox',{name:'Edit text on page',exact:true});
  await expect(editor).toBeFocused();
