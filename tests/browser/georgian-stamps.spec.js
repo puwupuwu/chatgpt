@@ -5,10 +5,11 @@ import {png} from '../fixture.js';
 test('Georgian text and reusable stamps persist in exported PDF',async({page})=>{
  test.setTimeout(120000);
  await page.goto('/');await page.locator('#sample').click();await expect(page.locator('#export')).toBeEnabled();
+ await page.locator('[data-tool="text"]').click();
  await page.locator('#ink').click({position:{x:80,y:180}});
  await page.locator('#textValue').fill('გამარჯობა საქართველო');
  await page.locator('#addText').click();await expect(page.locator('#export')).toBeEnabled();
- await page.locator('[data-tool="select"]').click();
+ await page.locator('[data-tool="edit-text"]').click();
  await page.getByRole('button',{name:'Text: გამარჯობა საქართველო',exact:true}).click();
  const inline=page.getByRole('textbox',{name:'Edit text on page',exact:true});
  await inline.fill('შეცვლილი ქართული ტექსტი');await inline.press('Control+Enter');

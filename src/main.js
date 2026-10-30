@@ -7,7 +7,7 @@ import {hasGeorgian,loadGeorgianFont} from './fonts.js';
 import {stampMaker} from './stamps.js';
 pdfjs.GlobalWorkerOptions.workerSrc=worker;
 const $=id=>document.getElementById(id);
-let original=null,pages=[],current=0,tool='text',busy=false,viewport,history=[],future=[],dirty=false,name='document.pdf',gesture=null,point=null;
+let original=null,pages=[],current=0,tool='edit-text',busy=false,viewport,history=[],future=[],dirty=false,name='document.pdf',gesture=null,point=null;
 let inlineEdit=null;
 let pendingStamp=null;
 let renderedBytes=null,contentItems=[],selected=null,objectDrag=null,imageMode='insert';
@@ -17,7 +17,7 @@ function controls(){
   const editing=!!inlineEdit;
   $('objectList').disabled=busy||editing;
   for(const id of ['openStamps','insertImage','insertShape','applyObject','removeObject','replaceImage'])$(id).disabled=busy||!original||editing;
-  $('applyObject').disabled=busy||!original;
+  $('applyObject').disabled=busy||!original||editing;
   for(const id of ['export','rotate','delete','moveLeft','moveRight','prev','next']) $(id).disabled=busy||!pages.length||editing;
   $('delete').disabled=busy||editing||pages.length<2;
   $('prev').disabled=$('moveLeft').disabled=busy||editing||current===0;
@@ -48,7 +48,8 @@ async function render(){
     overlay.width=Math.ceil(viewport.width);overlay.height=Math.ceil(viewport.height);
     await p.render({canvasContext:canvas.getContext('2d'),viewport,transform:[ratio,0,0,ratio,0,0]}).promise;
   }finally{await doc.destroy();}
-  if(tool==='select')await refreshContent();
+  syncToolUI();
+  if(isEditingTool())await refreshContent();
   controls();
 }
 async function openBytes(bytes,filename){
@@ -59,7 +60,7 @@ async function openBytes(bytes,filename){
   original=bytes;pages=next;current=0;name=filename;history=[];future=[];dirty=false;
   try{await render();}catch(e){({original,pages,current,name,history,future,dirty}=old);throw e;}
   $('filename').textContent=filename;$('empty').hidden=true;$('editor').hidden=false;
-  status('Ready to edit. Your file stays on this device.');
+  if(!isEditingTool())status('Ready to edit. Your file stays on this device.');
 }
 async function openFile(file){if(!file)return;await locked(async()=>{
   if(file.size>50*1024*1024)throw new Error('Please choose a PDF smaller than 50 MB.');
@@ -78,13 +79,23 @@ $('sample').onclick=()=>locked(async()=>openBytes(await samplePdf(),'welcome.pdf
 document.addEventListener('dragover',e=>{e.preventDefault();$('empty').classList.add('dragging');});
 document.addEventListener('dragleave',()=>$('empty').classList.remove('dragging'));
 document.addEventListener('drop',e=>{e.preventDefault();$('empty').classList.remove('dragging');openFile(e.dataTransfer.files[0]);});
+function isEditingTool(){return tool==='edit-text'||tool==='select';}
+function visibleItems(){return contentItems.filter(item=>tool==='edit-text'?item.type==='text'&&item.text.trim():item.type!=='text');}
+function syncToolUI(){
+  const textMode=tool==='edit-text',editing=isEditingTool();
+  for(const b of document.querySelectorAll('[data-tool]')){b.classList.toggle('selected',b.dataset.tool===tool);b.setAttribute('aria-pressed',String(b.dataset.tool===tool));}
+  $('contentPanel').hidden=!editing;$('objects').hidden=!editing;$('ink').style.pointerEvents=editing?'none':'auto';
+  $('objects').classList.toggle('text-mode',textMode);
+  $('contentPanel').setAttribute('aria-label',textMode?'Text editing':'Object properties');
+  $('listLabel').textContent=textMode?'Page text':'Page objects';
+  $('modeNote').textContent=textMode?'Click a text region or choose a text block above. Type individual letters, then choose Done. Escape cancels.':'Select an image, stamp, or shape. Drag to move it; drag its corner to resize.';
+  $('hint').textContent={'edit-text':'Click existing text to place a cursor and edit letters. Done saves your edit.',select:'Select images, stamps, and shapes to move, resize, replace, or delete.',text:'Click on the page to add new text.',highlight:'Drag across the area you want to highlight.',pen:'Draw with your mouse, pen, or finger to add a signature.'}[tool]||'Click on the page to place your stamp.';
+}
 for(const button of document.querySelectorAll('[data-tool]'))button.onclick=async()=>{
-  if(busy)return;
-  pendingStamp=null;tool=button.dataset.tool;
-  for(const b of document.querySelectorAll('[data-tool]')){b.classList.toggle('selected',b===button);b.setAttribute('aria-pressed',String(b===button));}
-  $('contentPanel').hidden=tool!=='select';$('objects').hidden=tool!=='select';$('ink').style.pointerEvents=tool==='select'?'none':'auto';
-  if(tool==='select'&&original)await locked(refreshContent);
-  $('hint').textContent={select:'Click text to type directly on the page. Drag objects to move them.',text:'Click on the page to place a text note.',highlight:'Drag across the area you want to highlight.',pen:'Draw with your mouse, pen, or finger to add a signature.'}[tool];
+  if(busy||inlineEdit)return;
+  pendingStamp=null;tool=button.dataset.tool;selected=null;$('properties').hidden=true;
+  syncToolUI();
+  if(isEditingTool()&&original)await locked(refreshContent);
 };
 $('zoom').onchange=()=>{if(original)locked(render);};
 $('prev').onclick=()=>locked(async()=>{current--;await render();});
@@ -105,13 +116,12 @@ document.addEventListener('keydown',e=>{
 });
 function pos(e){const r=$('ink').getBoundingClientRect();return [Math.max(0,Math.min(viewport.width,(e.clientX-r.left)*viewport.width/r.width)),Math.max(0,Math.min(viewport.height,(e.clientY-r.top)*viewport.height/r.height))];}
 $('ink').onpointerdown=e=>{
-  if(busy||!original||e.button!==0||tool==='select')return;
+  if(busy||!original||e.button!==0||isEditingTool())return;
   const p=pos(e);
   if(tool==='stamp'){
     if(!pendingStamp)return;const stamp=pendingStamp;pendingStamp=null;
     const zoom=Number($('zoom').value),width=stamp.width,height=stamp.width*stamp.height/stamp.pixelWidth;
-    tool='select';$('contentPanel').hidden=false;$('objects').hidden=false;$('ink').style.pointerEvents='none';
-    for(const b of document.querySelectorAll('[data-tool]')){b.classList.toggle('selected',b.dataset.tool==='select');b.setAttribute('aria-pressed',String(b.dataset.tool==='select'));}
+    tool='select';syncToolUI();
     applyContent({image:stamp.image,x:Math.max(0,Math.min(p[0]/zoom,viewport.width/zoom-width)),y:Math.max(0,Math.min(p[1]/zoom,viewport.height/zoom-height)),width,height},null);return;
   }
   if(tool==='text'){point=viewport.convertToPdfPoint(...p);$('textValue').value='';$('textDialog').returnValue='';$('textDialog').showModal();$('textValue').focus();return;}
@@ -156,18 +166,27 @@ async function refreshContent(){
   if(!renderedBytes)return;
   status('Reading editable content…');
   const result=await listContent(renderedBytes,current);contentItems=result.items;
-  const list=$('objectList');list.replaceChildren(new Option('Select an object…',''));
-  for(const item of contentItems)list.add(new Option(objectLabel(item),String(item.id)));
-  paintObjects();status(contentItems.length+' editable objects. Select one to edit.');
+  const items=visibleItems(),textMode=tool==='edit-text';
+  const list=$('objectList');list.replaceChildren(new Option(textMode?'Choose text to edit…':'Select an object…',''));
+  for(const item of items)list.add(new Option(objectLabel(item),String(item.id)));
+  paintObjects();
+  status(items.length?(textMode?items.length+' text blocks. Click text on the page to edit letters.':items.length+' editable objects. Select one to edit.'):(textMode?'No editable text found on this page. Scanned or outlined text needs OCR; use Add text to add new wording.':'No images or shapes found on this page.'));
+
 }
 function paintObjects(){
   const root=$('objects');root.replaceChildren();const zoom=Number($('zoom').value);
-  for(const item of contentItems){
+  for(const item of visibleItems()){
     const b=item.bounds,button=document.createElement('button');button.className='object-box';if(item.type==='text')button.classList.add('text-object');
     button.dataset.objectId=item.id;button.dataset.objectType=item.type;button.title=objectLabel(item);button.setAttribute('aria-label',objectLabel(item));
     button.style.cssText='left:'+b[0]*zoom+'px;top:'+b[1]*zoom+'px;width:'+Math.max(6,(b[2]-b[0])*zoom)+'px;height:'+Math.max(6,(b[3]-b[1])*zoom)+'px';
+    // Text hits never participate in drag/resize or pointer capture.
+    // Large drawings and images are excluded entirely from text hit testing.
+    if(tool==='edit-text'){
+      button.onclick=e=>{if(!busy&&!inlineEdit){selectObject(item.id);startInline(item,e);}};
+      root.append(button);continue;
+    }
     const grip=document.createElement('span');grip.className='resize-grip';button.append(grip);
-    button.onclick=e=>{if(!busy&&!inlineEdit){selectObject(item.id);if(item.type==='text')startInline(item,e);}};
+    button.onclick=()=>{if(!busy&&!inlineEdit)selectObject(item.id);};
     button.onpointerdown=e=>{
       if(busy||inlineEdit||e.button!==0)return;e.preventDefault();selectObject(item.id);button.setPointerCapture(e.pointerId);
       objectDrag={id:item.id,start:[e.clientX,e.clientY],bounds:[...b],resize:e.target===grip,button,changed:false,pointer:e.pointerId};
@@ -188,7 +207,7 @@ function paintObjects(){
 }
 function selectObject(id){
   const item=contentItems.find(i=>i.id===id);if(!item)return;
-  selected=id;$('properties').hidden=false;$('objectList').value=String(id);$('objectType').textContent=objectLabel(item);
+  selected=id;$('properties').hidden=tool==='edit-text';$('objectList').value=String(id);$('objectType').textContent=objectLabel(item);
   for(const b of $('objects').children)b.classList.toggle('active',Number(b.dataset.objectId)===id);
   const [x,y,x2,y2]=item.bounds;
   for(const [key,val] of Object.entries({objectX:x,objectY:y,objectW:Math.max(1,x2-x),objectH:Math.max(1,y2-y)}))$(key).value=val.toFixed(1);
@@ -196,7 +215,7 @@ function selectObject(id){
   $('objectText').value=item.text||'';$('objectSize').value=Math.round(item.size||18);$('objectColor').value=item.color;
   $('objectFont').value=hasGeorgian(item.text||'')?'Noto Sans Georgian':item.font?.includes('Times')?'Times-Roman':item.font?.includes('Courier')?'Courier':'Helvetica';
 }
-$('objectList').onchange=e=>{if(e.target.value!=='')selectObject(Number(e.target.value));};
+$('objectList').onchange=e=>{if(e.target.value==='')return;const id=Number(e.target.value);selectObject(id);if(tool==='edit-text'){const item=contentItems.find(i=>i.id===id);if(item)startInline(item);}};
 function geometry(){
   const patch={x:Number($('objectX').value),y:Number($('objectY').value),width:Number($('objectW').value),height:Number($('objectH').value)};
   if(!Object.values(patch).every(Number.isFinite)||patch.width<=0||patch.height<=0)throw new Error('Use finite positions and positive dimensions.');
@@ -258,7 +277,7 @@ function startInline(item,event){
   editor.contentEditable='plaintext-only';editor.setAttribute('role','textbox');editor.setAttribute('aria-label','Edit text on page');editor.setAttribute('aria-multiline','true');editor.spellcheck=false;
   editor.style.fontSize=(item.size||18)*zoom+'px';editor.style.color=item.color;
   editor.style.fontFamily=item.font?.includes('Times')?'Times New Roman, serif':item.font?.includes('Courier')?'Courier New, monospace':'Arial, sans-serif';
-  editor.style.fontFamily+=', "Paperdesk Georgian"';
+  editor.style.fontFamily=editor.style.fontFamily.replace(', serif',', "Paperdesk Georgian", serif').replace(', monospace',', "Paperdesk Georgian", monospace').replace(', sans-serif',', "Paperdesk Georgian", sans-serif');
   if(hasGeorgian(item.text))editor.style.fontFamily='"Paperdesk Georgian", Arial, sans-serif';
   editor.style.minHeight=Math.max((b[3]-b[1])*zoom,(item.size||18)*zoom*1.3)+'px';
   editor.textContent=item.text;
@@ -305,7 +324,8 @@ $('objectText').addEventListener('input',()=>{if(inlineEdit)inlineEdit.editor.te
 loadGeorgianFont().catch(error=>status(error.message,true));
 stampMaker(async stamp=>{
  if(busy||!original||inlineEdit)return;
- pendingStamp=stamp;tool='stamp';$('contentPanel').hidden=true;$('objects').hidden=true;$('ink').style.pointerEvents='auto';
- for(const b of document.querySelectorAll('[data-tool]')){b.classList.remove('selected');b.setAttribute('aria-pressed','false');}
+ pendingStamp=stamp;tool='stamp';syncToolUI();
  status('Click on the page to place your stamp. Choose another tool to cancel.');
 });
+
+syncToolUI();

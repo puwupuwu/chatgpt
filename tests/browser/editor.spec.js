@@ -7,6 +7,7 @@ test('edit, undo, highlight, sign, rotate, organize and export',async({page})=>{
  await page.getByRole('button',{name:'Try a sample document'}).click();
  await expect(page.locator('#position')).toHaveText('1 / 2');
  await expect(page.locator('#export')).toBeEnabled();
+ await page.locator('[data-tool="text"]').click();
  await page.locator('#ink').click({position:{x:100,y:150}});
  await page.locator('#textValue').fill('Approved by Paperdesk');
  await page.locator('#addText').click();
